@@ -13,11 +13,16 @@ class Discard {
   }
 
   _canAdd(newCard) {
-    if (this.discardedCards[newCard.id] !== undefined || hand.containsId(newCard.id, true)) {
+    if (this.discardedCards[newCard.id] !== undefined) {
       return false;
-    } else {
-      return true;
     }
+    var allHands = (typeof hands !== 'undefined' && hands.length) ? hands : [hand];
+    for (var i = 0; i < allHands.length; i++) {
+      if (allHands[i].containsId(newCard.id, true)) {
+        return false;
+      }
+    }
+    return true;
   }
 
   deleteCardById(id) {

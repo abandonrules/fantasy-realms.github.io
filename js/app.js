@@ -43,7 +43,7 @@ $(document).ready(function () {
       configureSound();
       showCards();
       getDiscardFromQueryString();
-      getHandFromQueryString();
+      getHandsFromQueryString();
       $('#ch_items').change(function () {
         toggleCursedHoardItems();
       });
@@ -69,6 +69,8 @@ var cursedHoardItems = false;
 var cursedHoardSuits = false;
 var playerCount = 4;
 var inputDiscardArea = false;
+var hands = [hand];
+var activeHandIndex = 0;
 
 function selectLanguage(lang) {
   localStorage.setItem('language', lang);
@@ -188,10 +190,101 @@ function setPlayerCount(count) {
   updateHandView();
 }
 
+function setActiveHand(index) {
+  if (index < 0 || index >= hands.length) {
+    return;
+  }
+  click.play();
+  activeHandIndex = index;
+  hand = hands[activeHandIndex];
+  updateHandView();
+  showCards();
+  updateCardOwners();
+}
+
+function addPlayer() {
+  click.play();
+  hands.push(new Hand());
+  activeHandIndex = hands.length - 1;
+  hand = hands[activeHandIndex];
+  updateHandView();
+  showCards();
+  updatePlayerBar();
+  updateCardOwners();
+}
+
+function removePlayer() {
+  if (hands.length <= 1) {
+    return;
+  }
+  click.play();
+  hands.splice(activeHandIndex, 1);
+  if (activeHandIndex >= hands.length) {
+    activeHandIndex = hands.length - 1;
+  }
+  hand = hands[activeHandIndex];
+  updateHandView();
+  showCards();
+  updatePlayerBar();
+  updateCardOwners();
+}
+
+function updatePlayerBar() {
+  var html = '';
+  for (var i = 0; i < hands.length; i++) {
+    var score = hands[i].score(discard);
+    if (i === activeHandIndex) {
+      html += '<button type="button" class="btn btn-sm btn-primary" onclick="setActiveHand(' + i + ')">P' + (i + 1) + ': ' + score + '</button> ';
+    } else {
+      html += '<button type="button" class="btn btn-sm btn-secondary" onclick="setActiveHand(' + i + ')">P' + (i + 1) + ': ' + score + '</button> ';
+    }
+  }
+  html += '<button type="button" class="btn btn-sm btn-success" onclick="addPlayer()">+</button> ';
+  if (hands.length > 1) {
+    html += '<button type="button" class="btn btn-sm btn-danger" onclick="removePlayer()">-</button>';
+  }
+  $('#players').html(html);
+}
+
+function updateCardOwners() {
+  if (!$('#cards').length) {
+    return;
+  }
+  $('#cards li.list-group-item').each(function () {
+    var match = ($(this).attr('onclick') || '').match(/addToView\('([^']+)'\)/);
+    if (!match) {
+      return;
+    }
+    var id = match[1];
+    var owners = [];
+    if (typeof hands !== 'undefined' && hands) {
+      for (var i = 0; i < hands.length; i++) {
+        if (hands[i].getCardById(id) !== undefined) {
+          owners.push('P' + (i + 1));
+        }
+      }
+    }
+    var span = $(this).find('.owners');
+    if (owners.length === 0) {
+      span.remove();
+    } else {
+      var text = ' (' + owners.join(', ') + ')';
+      if (span.length) {
+        span.text(text);
+      } else {
+        $(this).append(' <span class="owners">' + text + '</span>');
+      }
+    }
+  });
+}
+
 function reset() {
   clear.play();
   discard.clear();
-  hand.clear();
+  for (var _h = 0; _h < hands.length; _h++) {
+    hands[_h].clear();
+  }
+  hand = hands[activeHandIndex];
   showCards();
   updateHandView();
   actionId = NONE;
@@ -304,6 +397,8 @@ function updateHandView() {
   } else {
     $('#settings').hide();
   }
+  updatePlayerBar();
+  updateCardOwners();
   updateUrl();
 }
 
@@ -321,6 +416,8 @@ function updateDiscardAreaView() {
   } else {
     $('#points').text('-' + ('000' + Math.abs(score)).slice(-3));
   }
+  updatePlayerBar();
+  updateCardOwners();
   updateUrl();
 }
 
@@ -337,8 +434,9 @@ function updateUrl() {
     params.push('expansions=' + expansions.join(','));
     params.push('playerCount=' + playerCount);
   }
-  if (!hand.empty()) {
-    params.push('hand=' + hand.toString());
+  var handStrings = hands.map(function (h) { return h.empty() ? '' : h.toString(); });
+  if (handStrings.some(function (str) { return str !== ''; })) {
+    params.push('hands=' + handStrings.map(function (str) { return str === '' ? '_' : str; }).join('|'));
   }
   if (discard.size() > 0) {
     params.push('discard=' + discard.toString());
@@ -350,15 +448,34 @@ function updateUrl() {
   }
 }
 
-function getHandFromQueryString() {
+function getHandsFromQueryString() {
   var params = window.location.href.slice(window.location.href.indexOf('?') + 1).split('&');
   for (var i = 0; i < params.length; i++) {
     var param = params[i].split('=');
-    if (param[0] === 'hand') {
-      hand.loadFromString(decodeURIComponent(param[1]).replace(/ /g, '+'));
+    if (param[0] === 'hands') {
+      var handStrings = decodeURIComponent(param[1]).replace(/ /g, '+').split('|');
+      hands = [];
+      for (var h = 0; h < handStrings.length; h++) {
+        var newHand = new Hand();
+        if (handStrings[h] !== '_' && handStrings[h] !== '') {
+          newHand.loadFromString(handStrings[h]);
+        }
+        hands.push(newHand);
+      }
+      if (hands.length === 0) {
+        hands = [new Hand()];
+      }
+      activeHandIndex = 0;
+      hand = hands[activeHandIndex];
+    } else if (param[0] === 'hand') {
+      if (hands.length === 1 && hands[0].empty()) {
+        hands[0].loadFromString(decodeURIComponent(param[1]).replace(/ /g, '+'));
+        hand = hands[0];
+      }
     }
   }
   updateHandView();
+  updatePlayerBar();
 }
 
 function getDiscardFromQueryString() {
@@ -428,6 +545,7 @@ function selectSuit(suit) {
 function switchToDiscardArea() {
   click.play();
   inputDiscardArea = true;
+  $('#discard-toggle-link').text('Back to hand');
   updateDiscardAreaView();
   showCards(allSuits());
   $("#hand").hide();
@@ -437,6 +555,7 @@ function switchToDiscardArea() {
 function switchToHand() {
   click.play();
   inputDiscardArea = false;
+  $('#discard-toggle-link').text('Discard area');
   updateHandView();
   showCards();
   $("#discard").hide();
@@ -444,9 +563,24 @@ function switchToHand() {
 }
 
 function showCards(suits) {
+  var cardsBySuit = deck.getCardsBySuit(suits);
+  for (var _suit in cardsBySuit) {
+    for (var _c = 0; _c < cardsBySuit[_suit].length; _c++) {
+      var _card = cardsBySuit[_suit][_c];
+      var _owners = [];
+      if (typeof hands !== 'undefined' && hands) {
+        for (var _i = 0; _i < hands.length; _i++) {
+          if (hands[_i].getCardById(_card.id) !== undefined) {
+            _owners.push(_i + 1);
+          }
+        }
+      }
+      _card.owners = _owners;
+    }
+  }
   var template = Handlebars.compile($("#cards-template").html());
   var html = template({
-    suits: deck.getCardsBySuit(suits),
+    suits: cardsBySuit,
   }, {
     allowProtoMethodsByDefault: true
   });
